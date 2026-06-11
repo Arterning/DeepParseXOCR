@@ -29,9 +29,24 @@ def create_test_image(path: str):
     print(f"🖼️  已生成测试图片: {path}")
 
 
+def _to_pdf_bytes(file_path: Path) -> bytes:
+    """将图片转为 PDF bytes；PDF 文件直接返回。"""
+    suffix = file_path.suffix.lower()
+    if suffix == ".pdf":
+        return file_path.read_bytes()
+
+    from PIL import Image
+    import io
+
+    img = Image.open(file_path)
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="PDF")
+    return buf.getvalue()
+
+
 async def test_parse(file_path: str):
     file_path = Path(file_path)
-    pdf_bytes = file_path.read_bytes()
+    pdf_bytes = _to_pdf_bytes(file_path)
     file_stem = file_path.stem
 
     OUTPUT_DIR.mkdir(exist_ok=True)

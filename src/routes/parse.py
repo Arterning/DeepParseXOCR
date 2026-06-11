@@ -18,6 +18,24 @@ router = APIRouter()
 # 合法的 task 值
 VALID_TASKS = {"default", "double_page"}
 
+# MinerU pipeline 后端要求 PDF 输入，图片需先转换
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp", ".gif", ".jp2"}
+
+
+def _ensure_pdf_bytes(filename: str, raw: bytes) -> bytes:
+    """图片 → PDF bytes；PDF/Office 文件原样返回。"""
+    suffix = Path(filename).suffix.lower()
+    if suffix not in IMAGE_SUFFIXES:
+        return raw
+
+    from PIL import Image
+    import io
+
+    img = Image.open(io.BytesIO(raw))
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="PDF")
+    return buf.getvalue()
+
 
 @router.post("/parse", response_model=ParseResponse)
 async def parse(
@@ -57,11 +75,12 @@ async def parse(
         pass
 
     # ---- 3. 调用 MinerU 引擎 ----
+    pdf_bytes = _ensure_pdf_bytes(file.filename, file_bytes)
     try:
         await aio_do_parse(
             output_dir=str(output_dir),
             pdf_file_names=[file_stem],
-            pdf_bytes_list=[file_bytes],
+            pdf_bytes_list=[pdf_bytes],
             p_lang_list=[settings.default_lang],
             backend=settings.default_backend,
             parse_method=parse_method,
