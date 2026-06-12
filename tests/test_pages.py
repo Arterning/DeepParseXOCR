@@ -28,19 +28,34 @@ def _to_pdf_bytes(file_path: Path) -> bytes:
     return buf.getvalue()
 
 
+def _strip_html(html: str) -> str:
+    import re
+    return re.sub(r'<[^>]+>', ' ', html).strip()
+
+
 def _extract_v2_text(block: dict) -> str:
     """从 content_list_v2 的 block 中递归提取纯文本。"""
     if not isinstance(block, dict):
         return ""
     if block.get("type") == "text":
         return block.get("content", "")
+
     inner = block.get("content", {})
-    if isinstance(inner, dict):
-        for key in inner:
-            if isinstance(inner[key], list):
-                parts = [_extract_v2_text(item) for item in inner[key]]
-                return "".join(parts)
-    return ""
+    if not isinstance(inner, dict):
+        return ""
+
+    parts: list[str] = []
+    for key, val in inner.items():
+        if isinstance(val, list):
+            for item in val:
+                if isinstance(item, dict):
+                    parts.append(_extract_v2_text(item))
+                elif isinstance(item, str):
+                    parts.append(item)
+        elif isinstance(val, str):
+            if key in ("html", "table_body"):
+                parts.append(_strip_html(val))
+    return " ".join(p for p in parts if p.strip())
 
 
 def _extract_pages_content(output_dir: Path, file_stem: str) -> list[str]:
@@ -71,6 +86,8 @@ def _extract_pages_content(output_dir: Path, file_stem: str) -> list[str]:
                 continue
             p = block.get("page_idx", 0)
             t = block.get("text", "")
+            if not t.strip() and block.get("type") == "table":
+                t = _extract_v2_text(block)
             if t.strip():
                 page_map.setdefault(p, []).append(t)
         pages = ["\n".join(page_map[i]) for i in sorted(page_map)]

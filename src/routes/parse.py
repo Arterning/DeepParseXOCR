@@ -22,25 +22,39 @@ VALID_TASKS = {"default", "double_page"}
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp", ".gif", ".jp2"}
 
 
+def _strip_html(html: str) -> str:
+    """去掉 HTML 标签，保留纯文本。"""
+    import re
+    return re.sub(r'<[^>]+>', ' ', html).strip()
+
+
 def _extract_v2_text(block: dict) -> str:
     """从 content_list_v2 的 block 中递归提取纯文本。
 
-    v2 结构示例:
-        {"type":"paragraph", "content":{"paragraph_content":[
-            {"type":"text", "content":"实际文字"}
-        ]}}
+    处理 paragraph / title / table / page_number 等类型，
+    table 的 html 内容会自动剥离标签。
     """
     if not isinstance(block, dict):
         return ""
     if block.get("type") == "text":
         return block.get("content", "")
+
     inner = block.get("content", {})
-    if isinstance(inner, dict):
-        for key in inner:
-            if isinstance(inner[key], list):
-                parts = [_extract_v2_text(item) for item in inner[key]]
-                return "".join(parts)
-    return ""
+    if not isinstance(inner, dict):
+        return ""
+
+    parts: list[str] = []
+    for key, val in inner.items():
+        if isinstance(val, list):
+            for item in val:
+                if isinstance(item, dict):
+                    parts.append(_extract_v2_text(item))
+                elif isinstance(item, str):
+                    parts.append(item)
+        elif isinstance(val, str):
+            if key in ("html", "table_body"):
+                parts.append(_strip_html(val))
+    return " ".join(p for p in parts if p.strip())
 
 
 def _ensure_pdf_bytes(filename: str, raw: bytes) -> bytes:
@@ -150,7 +164,10 @@ async def parse(
                         if not isinstance(block, dict):
                             continue
                         page_idx = block.get("page_idx", 0)
-                        text = block.get("text") or block.get("md") or ""
+                        # 优先用 text 字段；表格用 table_caption + table_body
+                        text = block.get("text", "")
+                        if not text.strip() and block.get("type") == "table":
+                            text = _extract_v2_text(block)
                         if text.strip():
                             page_map.setdefault(page_idx, []).append(text)
                     pages_content = [
