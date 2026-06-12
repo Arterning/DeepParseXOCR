@@ -28,9 +28,23 @@ def _to_pdf_bytes(file_path: Path) -> bytes:
     return buf.getvalue()
 
 
+def _extract_v2_text(block: dict) -> str:
+    """从 content_list_v2 的 block 中递归提取纯文本。"""
+    if not isinstance(block, dict):
+        return ""
+    if block.get("type") == "text":
+        return block.get("content", "")
+    inner = block.get("content", {})
+    if isinstance(inner, dict):
+        for key in inner:
+            if isinstance(inner[key], list):
+                parts = [_extract_v2_text(item) for item in inner[key]]
+                return "".join(parts)
+    return ""
+
+
 def _extract_pages_content(output_dir: Path, file_stem: str) -> list[str]:
     """从 MinerU 输出中提取分页内容。"""
-    # 优先 v2（按页嵌套），其次 v1（平铺）
     cl_path = None
     for name in [f"{file_stem}_content_list_v2.json", f"{file_stem}_content_list.json"]:
         hits = sorted(output_dir.rglob(name))
@@ -47,22 +61,16 @@ def _extract_pages_content(output_dir: Path, file_stem: str) -> list[str]:
 
     pages: list[str] = []
     if isinstance(data[0], list):
-        # v2: [[page0_blocks], [page1_blocks], ...]
         for page_blocks in data:
-            texts = [
-                b.get("text") or b.get("md") or ""
-                for b in page_blocks
-                if isinstance(b, dict)
-            ]
+            texts = [_extract_v2_text(b) for b in page_blocks]
             pages.append("\n".join(t for t in texts if t.strip()))
     else:
-        # v1: [{page_idx, text/md, ...}, ...]
         page_map: dict[int, list[str]] = {}
         for block in data:
             if not isinstance(block, dict):
                 continue
             p = block.get("page_idx", 0)
-            t = block.get("text") or block.get("md") or ""
+            t = block.get("text", "")
             if t.strip():
                 page_map.setdefault(p, []).append(t)
         pages = ["\n".join(page_map[i]) for i in sorted(page_map)]

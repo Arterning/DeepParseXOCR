@@ -91,13 +91,13 @@ async def test_parse(file_path: str):
     if cl_file and cl_file.exists():
         with open(cl_file, encoding="utf-8") as f:
             data = json.load(f)
+        print(f"\n📊 content_list: {len(data)} 顶层项")
         if data:
             if isinstance(data[0], list):
-                # v2: 按页嵌套
                 for i, page in enumerate(data):
+                    total = sum(len(b.get("content", b.get("text",""))) for b in page if isinstance(b, dict))
                     print(f"   第 {i} 页 → {len(page)} 个块")
             else:
-                # v1: 平铺
                 pages: dict[int, int] = {}
                 for b in data:
                     p = b.get("page_idx", 0)

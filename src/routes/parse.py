@@ -22,6 +22,27 @@ VALID_TASKS = {"default", "double_page"}
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp", ".gif", ".jp2"}
 
 
+def _extract_v2_text(block: dict) -> str:
+    """从 content_list_v2 的 block 中递归提取纯文本。
+
+    v2 结构示例:
+        {"type":"paragraph", "content":{"paragraph_content":[
+            {"type":"text", "content":"实际文字"}
+        ]}}
+    """
+    if not isinstance(block, dict):
+        return ""
+    if block.get("type") == "text":
+        return block.get("content", "")
+    inner = block.get("content", {})
+    if isinstance(inner, dict):
+        for key in inner:
+            if isinstance(inner[key], list):
+                parts = [_extract_v2_text(item) for item in inner[key]]
+                return "".join(parts)
+    return ""
+
+
 def _ensure_pdf_bytes(filename: str, raw: bytes) -> bytes:
     """图片 → PDF bytes；PDF/Office 文件原样返回。"""
     suffix = Path(filename).suffix.lower()
@@ -121,7 +142,7 @@ async def parse(
                 # content_list_v1: 平铺 [{page_idx, text/md}, ...]
                 if isinstance(data[0], list):
                     for page_blocks in data:
-                        texts = [b.get("text") or b.get("md") or "" for b in page_blocks if isinstance(b, dict)]
+                        texts = [_extract_v2_text(b) for b in page_blocks]
                         pages_content.append("\n".join(t for t in texts if t.strip()))
                 else:
                     page_map: dict[int, list[str]] = {}
