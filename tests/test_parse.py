@@ -68,15 +68,14 @@ async def test_parse(file_path: str):
 
     print("✅ 解析完成!\n")
 
-    # 检查输出文件
-    result_dir = OUTPUT_DIR / file_stem
-    md_file = result_dir / f"{file_stem}.md"
-    cl_file = result_dir / f"{file_stem}_content_list.json"
+    # 检查输出文件 —— MinerU 会将结果放在 {output}/{stem}/{parse_method}/ 目录下
+    def _find(pattern: str) -> Path | None:
+        hits = sorted(OUTPUT_DIR.rglob(pattern))
+        return hits[0] if hits else None
 
-    # 也尝试扁平目录结构
-    if not md_file.exists():
-        md_file = OUTPUT_DIR / f"{file_stem}.md"
-        cl_file = OUTPUT_DIR / f"{file_stem}_content_list.json"
+    md_file = _find(f"{file_stem}.md")
+    # 优先新版 content_list
+    cl_file = _find(f"{file_stem}_content_list_v2.json") or _find(f"{file_stem}_content_list.json")
 
     if md_file.exists():
         content = md_file.read_text("utf-8")
@@ -89,20 +88,26 @@ async def test_parse(file_path: str):
         print("⚠️  未找到 .md 输出文件")
         print(f"   目录内容: {list(OUTPUT_DIR.rglob('*'))}")
 
-    if cl_file.exists():
+    if cl_file and cl_file.exists():
         with open(cl_file, encoding="utf-8") as f:
-            blocks = json.load(f)
-        print(f"\n📊 content_list.json: {len(blocks)} 个内容块")
-
-        # 按页统计
-        pages: dict[int, int] = {}
-        for b in blocks:
-            p = b.get("page_idx", 0)
-            pages[p] = pages.get(p, 0) + 1
-        for p, n in sorted(pages.items()):
-            print(f"   第 {p} 页 → {n} 个块")
+            data = json.load(f)
+        if data:
+            if isinstance(data[0], list):
+                # v2: 按页嵌套
+                for i, page in enumerate(data):
+                    print(f"   第 {i} 页 → {len(page)} 个块")
+            else:
+                # v1: 平铺
+                pages: dict[int, int] = {}
+                for b in data:
+                    p = b.get("page_idx", 0)
+                    pages[p] = pages.get(p, 0) + 1
+                for p, n in sorted(pages.items()):
+                    print(f"   第 {p} 页 → {n} 个块")
+        else:
+            print("   (空)")
     else:
-        print("⚠️  未找到 content_list.json")
+        print("⚠️  未找到 content_list")
 
 
 if __name__ == "__main__":
