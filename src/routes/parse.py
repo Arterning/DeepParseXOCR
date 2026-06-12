@@ -93,44 +93,49 @@ async def parse(
             detail=f"MinerU 解析失败: {exc}",
         )
 
-    # ---- 4. 收集结果 ----
-    result_dir = output_dir / file_stem
-    md_path = result_dir / f"{file_stem}.md"
-    cl_path = result_dir / f"{file_stem}_content_list.json"
+    # ---- 4. 收集结果 —— MinerU 结果在 {output}/{stem}/{parse_method}/ 下 -——
+    def _find(pattern: str) -> Path | None:
+        hits = sorted(output_dir.rglob(pattern))
+        return hits[0] if hits else None
 
-    if not md_path.exists():
-        # 尝试不带 stem 的目录结构（MinerU 版本差异）
-        alt_md = output_dir / f"{file_stem}.md"
-        alt_cl = output_dir / f"{file_stem}_content_list.json"
-        if alt_md.exists():
-            md_path = alt_md
-            cl_path = alt_cl
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail="MinerU 解析完成但未生成预期输出文件",
-            )
+    md_path = _find(f"{file_stem}.md")
+    cl_path = _find(f"{file_stem}_content_list_v2.json") or _find(f"{file_stem}_content_list.json")
+
+    if not md_path:
+        raise HTTPException(
+            status_code=500,
+            detail=f"MinerU 解析完成但未生成预期输出文件，目录内容: {sorted(output_dir.rglob('*'))}",
+        )
 
     # 全文
     content = md_path.read_text(encoding="utf-8")
 
     # 分页内容
     pages_content: list[str] = []
-    if cl_path.exists():
+    if cl_path and cl_path.exists():
         try:
             with open(cl_path, encoding="utf-8") as f:
-                blocks = json.load(f)
-            # 按 page_idx 聚合
-            page_map: dict[int, list[str]] = {}
-            for block in blocks:
-                page_idx = block.get("page_idx", 0)
-                text = block.get("text") or block.get("md") or ""
-                if text.strip():
-                    page_map.setdefault(page_idx, []).append(text)
-            pages_content = [
-                "\n".join(page_map[i])
-                for i in sorted(page_map)
-            ]
+                data = json.load(f)
+            if data:
+                # content_list_v2: 按页嵌套 [[page0_blocks], [page1_blocks], ...]
+                # content_list_v1: 平铺 [{page_idx, text/md}, ...]
+                if isinstance(data[0], list):
+                    for page_blocks in data:
+                        texts = [b.get("text") or b.get("md") or "" for b in page_blocks if isinstance(b, dict)]
+                        pages_content.append("\n".join(t for t in texts if t.strip()))
+                else:
+                    page_map: dict[int, list[str]] = {}
+                    for block in data:
+                        if not isinstance(block, dict):
+                            continue
+                        page_idx = block.get("page_idx", 0)
+                        text = block.get("text") or block.get("md") or ""
+                        if text.strip():
+                            page_map.setdefault(page_idx, []).append(text)
+                    pages_content = [
+                        "\n".join(page_map[i])
+                        for i in sorted(page_map)
+                    ]
         except (json.JSONDecodeError, KeyError):
             pages_content = []
 
